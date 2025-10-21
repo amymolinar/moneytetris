@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Money Tetris</title>
+<style>
+body {
+  margin: 0;
+  font-family: system-ui, Arial;
+  background: #f6fff2;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+.container {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: flex-start;
+}
+.play {
+  width: 84vw;
+  height: 70vw;
+  max-width: 90vh;
+  max-height: 90vh;
+  background: #dff7e1;
+  border-radius: 20px;
+  position: relative;
+  overflow: hidden;
+}
+canvas#game {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.hud {
+  width: 25vw;
+  min-width: 180px;
+  background: white;
+  border-left: 5px solid #2b7a6b;
+  padding: 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.hud h1 {
+  color: #2b7a6b;
+  font-size: 1.2rem;
+  margin: 0 0 0.5rem;
+}
+.big { font-size: 1.8rem; font-weight: 700; }
+.label { color: #333; font-size: 0.9rem; }
+button {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #2b7a6b;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  margin-top: 6px;
+  margin-right: 4px;
+}
+.status {
+  background: #fff5d6;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #ffe7a8;
+  text-align: center;
+  color: #6a4a00;
+  margin: 6px 0;
+}
+.level-buttons { margin-top: 10px; }
+#thermo { width: 50px; margin-top: 10px; border: 1px solid #333; background: #eee; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="play"><canvas id="game"></canvas></div>
+  <div class="hud">
+    <h1>Money Tetris</h1>
+    <div class="label">Target:</div>
+    <div id="target" class="big">— ¢</div>
+    <div class="label">Round Total:</div>
+    <div id="total" class="big">0 ¢</div>
+    <div class="status" id="status">Press Start to begin!</div>
+    <div class="level-buttons">
+      <label class="label">Level:</label><br>
+      <button id="level1Btn">Level 1</button>
+      <button id="level2Btn">Level 2</button>
+    </div>
+    <canvas id="thermo" width="50" height="300"></canvas>
+    <div style="margin-top:10px;">
+      <div class="label">Collected:</div>
+      <div id="collected" class="big">0 ¢</div>
+    </div>
+    <div style="margin-top: 12px;">
+      <button id="startBtn">Start</button>
+      <button id="restart">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const targetEl=document.getElementById("target");
+const totalEl=document.getElementById("total");
+const statusEl=document.getElementById("status");
+const restartBtn=document.getElementById("restart");
+const startBtn=document.getElementById("startBtn");
+const level1Btn=document.getElementById("level1Btn");
+const level2Btn=document.getElementById("level2Btn");
+const thermoCanvas=document.getElementById("thermo");
+const thermoCtx=thermoCanvas.getContext("2d");
+const collectedEl=document.getElementById("collected");
+
+let W,H,colW;
+const COLS=8;
+const coinStyles={
+  1:{color:"#a0522d",border:"#5c2e0d"},
+  5:{color:"#c0c0c0",border:"#7a7a7a"},
+  10:{color:"#e0e0e0",border:"#8c8c8c"},
+  25:{color:"#e6e6e6",border:"#b3b3b3"}
+};
+let coins=[];
+let stacks=Array.from({length:COLS},()=>[]);
+let gravity=1.25;
+let spawnTimer=0;
+let spawnInterval=1600; // 20% faster
+let currentTotal=0,target=0,gameOver=false,running=false,activeTarget=false;
+let roundsCompleted=0;
+let level=1;
+let availableValues=[1,5,10];
+let collectedTotal=0;
+
+const beepSound=new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+const maxThermoSteps=9;
+let thermoLevel=0;
+
+function resize(){
+  W=canvas.clientWidth=canvas.offsetWidth;
+  H=canvas.clientHeight=canvas.offsetHeight;
+  canvas.width=W;
+  canvas.height=H;
+  colW=W/COLS;
+}
+window.addEventListener("resize",resize);
+resize();
+
+function randomValue(){return availableValues[Math.floor(Math.random()*availableValues.length)];}
+function formatCents(v){return `${v} ¢`;}
+function formatDollars(c){let d=Math.floor(c/100),r=c%100;return `$${d}.${r.toString().padStart(2,'0')}`;}
+function speakNumber(number){
+  if('speechSynthesis' in window){
+    const msg=new SpeechSynthesisUtterance(number + " cents");
+    msg.rate=0.75;
+    window.speechSynthesis.speak(msg);
+  }
+}
+function speakGameOver(){
+  if('speechSynthesis' in window){
+    const msg=new SpeechSynthesisUtterance("Game Over");
+    msg.rate=0.75;
+    window.speechSynthesis.speak(msg);
+    setTimeout(()=>{
+      const totalMsg=new SpeechSynthesisUtterance("Total collected: " + formatDollars(collectedTotal));
+      totalMsg.rate=0.75;
+      window.speechSynthesis.speak(totalMsg);
+    },1500);
+  }
+}
+
+function updateThermo(){
+  thermoCtx.clearRect(0,0,thermoCanvas.width,thermoCanvas.height);
+  const sectionHeight=thermoCanvas.height/maxThermoSteps;
+  for(let i=0;i<maxThermoSteps;i++){
+    thermoCtx.fillStyle=i<thermoLevel?"#ff4d4d":"#eee";
+    thermoCtx.fillRect(0,thermoCanvas.height-(i+1)*sectionHeight,thermoCanvas.width,sectionHeight-2);
+    thermoCtx.strokeStyle="#333";
+    thermoCtx.strokeRect(0,thermoCanvas.height-(i+1)*sectionHeight,thermoCanvas.width,sectionHeight-2);
+  }
+}
+
+function updateHUD(){
+  targetEl.textContent=formatCents(target);
+  totalEl.textContent=formatCents(currentTotal);
+  collectedEl.textContent=formatCents(collectedTotal);
+}
+
+function spawnCoinWithValue(col,val=null){
+  const value = val!==null?val:randomValue();
+  const style = coinStyles[value];
+  const r = colW*0.35;
+  const x = col*colW + colW/2;
+  const y = -r;
+  coins.push({col,x,y,r,vy:0,value:value,color:style.color,border:style.border,stopped:false,landingTime:null});
+}
+
+function newTarget(){
+  if(activeTarget) return;
+  currentTotal=0;
+  activeTarget=true;
+  target=Math.floor(Math.random()*50)+1;
+  updateHUD();
+  statusEl.textContent=`${target} ¢`;
+  speakNumber(target);
+}
+
+function startGame(){
+  if(gameOver) restart();
+  running=true;
+  spawnInterval=1600; // faster
+  newTarget();
+  statusEl.textContent=`${target} ¢`;
+
+  // Start with 3 coins per column, at least 10 pennies
+  let penniesLeft = 10;
+  for(let c=0;c<COLS;c++){
+    for(let i=0;i<3;i++){
+      let val;
+      if(penniesLeft>0){
+        val=1;
+        penniesLeft--;
+      } else {
+        val=randomValue();
+      }
+      spawnCoinWithValue(c,val);
+    }
+  }
+}
+
+function restart(){
+  coins=[];
+  stacks=Array.from({length:COLS},()=>[]);
+  currentTotal=0;collectedTotal=0;
+  gameOver=false;running=false;activeTarget=false;
+  roundsCompleted=0;spawnInterval=1600;thermoLevel=0;
+  updateThermo();statusEl.textContent="Press Start to begin!";
+  updateHUD();
+}
+
+// Update / Draw
+function update(dt){
+  if(!running||gameOver) return;
+  spawnTimer+=dt;
+  if(spawnTimer>spawnInterval){
+    spawnTimer=0;
+    spawnCoinWithValue(Math.floor(Math.random()*COLS));
+  }
+  for(const c of coins){
+    if(c.stopped) continue;
+    c.vy+=gravity;
+    c.y+=c.vy*dt*0.05;
+    const stack=stacks[c.col];
+    const top=stack[stack.length-1];
+    const groundY=top?top.y-top.r-c.r:H-c.r;
+    if(c.y>=groundY){
+      c.y=groundY;
+      c.stopped=true;
+      c.vy=0;
+      if(!stack.includes(c)) stack.push(c);
+      beepSound.currentTime=0;
+      beepSound.play();
+      if(c.y-c.r<=0 && !gameOver){
+        gameOver=true;
+        statusEl.textContent="Game Over — Stack reached top!";
+        speakGameOver();
+      }
+    }
+  }
+}
+
+function draw(){
+  ctx.fillStyle="#dff7e1";
+  ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="#c3ebc7";
+  for(let i=1;i<COLS;i++){
+    const x=i*colW;
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,H);
+    ctx.stroke();
+  }
+  for(const c of coins){
+    ctx.beginPath();
+    ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
+    ctx.fillStyle=c.color;
+    ctx.fill();
+    ctx.lineWidth=2;
+    ctx.strokeStyle=c.border;
+    ctx.stroke();
+    ctx.fillStyle=c.border;
+    ctx.font=`${Math.round(c.r*0.7)}px system-ui`;
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    ctx.fillText(`${c.value}¢`,c.x,c.y);
+  }
+}
+
+// Click handler
+canvas.addEventListener("mousedown",(e)=>{
+  if(!running||gameOver) return;
+  const rect=canvas.getBoundingClientRect();
+  const x=e.clientX-rect.left;
+  const y=e.clientY-rect.top;
+  for(let i=coins.length-1;i>=0;i--){
+    const c=coins[i];
+    const dx=x-c.x, dy=y-c.y;
+    if(dx*dx+dy*dy <= c.r*c.r){
+      coins.splice(i,1);
+      const stack=stacks[c.col];
+      const indexInStack=stack.indexOf(c);
+      if(indexInStack!==-1){
+        const aboveCoins=stack.splice(indexInStack+1);
+        for(const ac of aboveCoins){ac.stopped=false;ac.vy=0;}
+        stack.splice(indexInStack,1);
+      }
+      currentTotal+=c.value;
+      collectedTotal+=c.value;
+      updateHUD();
+      if(currentTotal === target){
+        roundsCompleted++;
+        statusEl.textContent=`${target} ¢ reached!`;
+        activeTarget=false;
+        setTimeout(()=>{newTarget();},800);
+      } else if(currentTotal > target){
+        statusEl.textContent=`Exceeded! ${target} ¢`;
+        currentTotal=0;
+        updateHUD();
+        speakNumber(target);
+      }
+      break;
+    }
+  }
+});
+
+// Buttons
+startBtn.onclick=startGame;
+restartBtn.onclick=restart;
+level1Btn.onclick=()=>{level=1;availableValues=[1,5,10];restart();}
+level2Btn.onclick=()=>{level=2;availableValues=[1,5,10,25];restart();}
+
+// Animation loop
+let last=performance.now();
+function loop(now){
+  const dt=now-last;
+  last=now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+loop(last);
+
+})();
+</script>
+</body>
+</html>
