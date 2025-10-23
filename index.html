@@ -8,7 +8,7 @@
 body {
   margin: 0;
   font-family: system-ui, Arial;
-  background: #f6fff2;
+  background: #b6e3b1; /* darker background behind playfield */
   display: flex;
   justify-content: center;
   align-items: center;
@@ -21,12 +21,13 @@ body {
   align-items: flex-start;
 }
 .play {
-  width: 84vw;
-  height: 70vw;
-  max-width: 90vh;
-  max-height: 90vh;
-  background: #dff7e1;
-  border-radius: 20px;
+  width: 70vw;
+  height: calc(70vw * 3 / 4); /* 4:3 aspect ratio */
+  max-width: 80vh;
+  max-height: calc(80vh * 3 / 4);
+  background: #dff7e1; /* inner playfield color */
+  border-radius: 8px; /* small subtle corners */
+  border: 2px solid #2b7a6b; /* thin dark green border */
   position: relative;
   overflow: hidden;
 }
@@ -57,7 +58,7 @@ button {
   padding: 8px 12px;
   border: 0;
   border-radius: 8px;
-  background: #2b7a6b;
+  background: #3aa170; /* brightened button color */
   color: white;
   cursor: pointer;
   font-weight: 600;
@@ -158,18 +159,18 @@ function formatDollars(c){let d=Math.floor(c/100),r=c%100;return `$${d}.${r.toSt
 function speakNumber(number){
   if('speechSynthesis' in window){
     const msg=new SpeechSynthesisUtterance(number + " cents");
-    msg.rate=0.75;
+    msg.rate=1.5; // 50% faster
     window.speechSynthesis.speak(msg);
   }
 }
 function speakGameOver(){
   if('speechSynthesis' in window){
     const msg=new SpeechSynthesisUtterance("Game Over");
-    msg.rate=0.75;
+    msg.rate=1.5;
     window.speechSynthesis.speak(msg);
     setTimeout(()=>{
       const totalMsg=new SpeechSynthesisUtterance("Total collected: " + formatDollars(collectedTotal));
-      totalMsg.rate=0.75;
+      totalMsg.rate=1.5;
       window.speechSynthesis.speak(totalMsg);
     },1500);
   }
@@ -214,7 +215,7 @@ function newTarget(){
 function startGame(){
   if(gameOver) restart();
   running=true;
-  spawnInterval=1600; // faster
+  spawnInterval=1600;
   newTarget();
   statusEl.textContent=`${target} ¢`;
 
@@ -287,11 +288,13 @@ function draw(){
     ctx.stroke();
   }
   for(const c of coins){
+    const grad=ctx.createRadialGradient(c.x-c.r*0.3,c.y-c.r*0.3,c.r*0.1,c.x,c.y,c.r);
+    grad.addColorStop(0,"#ffffffaa");grad.addColorStop(0.2,c.color);grad.addColorStop(1,c.color);
     ctx.beginPath();
     ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
-    ctx.fillStyle=c.color;
+    ctx.fillStyle=grad;
     ctx.fill();
-    ctx.lineWidth=2;
+    ctx.lineWidth=Math.max(2,c.r*0.08);
     ctx.strokeStyle=c.border;
     ctx.stroke();
     ctx.fillStyle=c.border;
@@ -299,19 +302,24 @@ function draw(){
     ctx.textAlign="center";
     ctx.textBaseline="middle";
     ctx.fillText(`${c.value}¢`,c.x,c.y);
+
+    // tiny shadow under coin
+    ctx.beginPath();
+    ctx.ellipse(c.x,c.y+c.r*0.8,c.r*0.8,c.r*0.25,0,0,Math.PI*2);
+    ctx.fillStyle="rgba(0,0,0,0.15)";
+    ctx.fill();
   }
 }
 
-// Click handler
-canvas.addEventListener("mousedown",(e)=>{
+canvas.addEventListener("mousedown",e=>{
   if(!running||gameOver) return;
   const rect=canvas.getBoundingClientRect();
   const x=e.clientX-rect.left;
   const y=e.clientY-rect.top;
   for(let i=coins.length-1;i>=0;i--){
     const c=coins[i];
-    const dx=x-c.x, dy=y-c.y;
-    if(dx*dx+dy*dy <= c.r*c.r){
+    const dx=x-c.x,dy=y-c.y;
+    if(dx*dx+dy*dy<=c.r*c.r){
       coins.splice(i,1);
       const stack=stacks[c.col];
       const indexInStack=stack.indexOf(c);
@@ -323,12 +331,12 @@ canvas.addEventListener("mousedown",(e)=>{
       currentTotal+=c.value;
       collectedTotal+=c.value;
       updateHUD();
-      if(currentTotal === target){
+      if(currentTotal===target){
         roundsCompleted++;
         statusEl.textContent=`${target} ¢ reached!`;
         activeTarget=false;
-        setTimeout(()=>{newTarget();},800);
-      } else if(currentTotal > target){
+        setTimeout(()=>{newTarget();},1200);
+      } else if(currentTotal>target){
         statusEl.textContent=`Exceeded! ${target} ¢`;
         currentTotal=0;
         updateHUD();
@@ -339,13 +347,11 @@ canvas.addEventListener("mousedown",(e)=>{
   }
 });
 
-// Buttons
-startBtn.onclick=startGame;
 restartBtn.onclick=restart;
+startBtn.onclick=startGame;
 level1Btn.onclick=()=>{level=1;availableValues=[1,5,10];restart();}
 level2Btn.onclick=()=>{level=2;availableValues=[1,5,10,25];restart();}
 
-// Animation loop
 let last=performance.now();
 function loop(now){
   const dt=now-last;
@@ -355,7 +361,6 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 loop(last);
-
 })();
 </script>
 </body>
